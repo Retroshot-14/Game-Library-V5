@@ -1,0 +1,868 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8"/>
+<meta name="viewport" content="width=device-width,initial-scale=1"/>
+<title>MIC Game Library</title>
+<link rel="icon" href="favicon.ico" />
+<style>
+:root{
+  --bg:#0b0b0b; --text:#cfcfcf; --panel:#111; --muted:#9a9a9a;
+  --accent:#00aaff; --accent-contrast:#000; --card:#151515;
+  --radius:10px; --scale:1; --transparency:0.02;
+}
+*{box-sizing:border-box}
+html,body{height:100%;margin:0;font-family:Inter, "Segoe UI", system-ui, -apple-system, "Helvetica Neue", Arial;background:var(--bg);color:var(--text);-webkit-font-smoothing:antialiased}
+a{color:var(--accent)}
+/* background canvas sits behind content */
+#bgCanvas{position:fixed; inset:0; z-index:0; pointer-events:none;}
+
+/* Home overlay */
+#home {
+  position:fixed; inset:0; z-index:10; display:flex; align-items:center; justify-content:center;
+  background:#000; color:var(--text);
+  transition: opacity .6s ease, transform .6s ease;
+}
+.homeCard{
+  text-align:center; padding:36px; border-radius:12px; width:min(880px,92%); background:rgba(0,0,0,0.45);
+  box-shadow:0 10px 40px rgba(0,0,0,0.6); border:1px solid rgba(255,255,255,0.03);
+}
+.homeTitle{font-size:34px;font-weight:800;letter-spacing:1px}
+.subTitle{color:var(--muted); margin-top:8px}
+.enterBtn{margin-top:18px;padding:12px 20px;border-radius:10px;border:none;background:var(--accent);color:var(--accent-contrast);font-weight:800;cursor:pointer}
+
+/* top header */
+.header{position:relative;z-index:3;height:64px; display:flex; align-items:center; gap:14px; padding:0 20px; background:linear-gradient(180deg, rgba(255,255,255,0.01), transparent); border-bottom:1px solid rgba(255,255,255,0.03)}
+.brand{display:flex;align-items:center;gap:12px}
+.logo{width:36px;height:36px;border-radius:6px;background:linear-gradient(135deg,var(--accent),#006f9a);display:flex;align-items:center;justify-content:center;font-weight:800;font-family:monospace}
+.titleWrap{display:flex;flex-direction:column}
+.title{font-weight:800;font-size:14px}
+.subtitle{font-size:12px;color:var(--muted)}
+.nav{display:flex;gap:8px;margin-left:12px}
+.tab{padding:10px 14px;border-radius:8px;cursor:pointer;color:var(--muted);font-weight:700}
+.tab.active{color:#fff;background:linear-gradient(90deg, rgba(255,255,255,0.02), transparent);box-shadow:0 6px 18px rgba(0,0,0,0.45)}
+.headerRight{margin-left:auto;display:flex;gap:8px;align-items:center;color:var(--muted)}
+.clock{font-weight:700}
+
+/* layout */
+.container{display:flex; height:calc(100vh - 64px); gap:18px;padding:18px; align-items:stretch; min-width:0; z-index:2}
+.sidebar{width:260px;background:rgba(255,255,255,var(--transparency));backdrop-filter: blur(6px);border-radius:var(--radius);padding:12px;overflow:auto}
+.content{flex:1; display:flex; flex-direction:column; gap:12px; min-width:0; overflow:hidden}
+.panel{background:linear-gradient(180deg, rgba(255,255,255,0.01), transparent); padding:14px; border-radius:var(--radius); min-height:0; overflow:auto}
+
+/* grid */
+.grid{display:grid; gap:10px; grid-template-columns:repeat(auto-fill,minmax(calc(180px * var(--scale)),1fr))}
+.gameCard{background:var(--card); padding:12px; border-radius:calc(var(--radius) * var(--scale)); cursor:pointer; transition:transform .18s, box-shadow .18s; display:flex; flex-direction:column; min-height:86px; transform-origin:center}
+.gameCard:hover{transform:translateY(-6px); box-shadow:0 18px 40px rgba(0,0,0,0.6)}
+.gameTitle{font-weight:700; margin-bottom:8px; font-size:calc(14px * var(--scale))}
+.small{font-size:calc(12px * var(--scale)); color:var(--muted)}
+
+/* compact */
+.compact .gameCard{padding:8px; min-height:56px}
+
+/* list view not used but kept */
+.listView .gameCard{display:flex;align-items:center}
+
+/* controls */
+.controls{display:flex;gap:8px;align-items:center}
+.select{padding:8px;border-radius:8px;border:none;background:rgba(255,255,255,0.02);color:var(--text)}
+
+/* overlay for loading */
+.overlay{position:fixed;inset:0;display:none;align-items:center;justify-content:center;background:rgba(0,0,0,0.5);z-index:9}
+.spinner{width:64px;height:64px;border-radius:50%;border:8px solid rgba(255,255,255,0.06);border-top-color:var(--accent);animation:spin 900ms linear infinite}
+@keyframes spin{to{transform:rotate(360deg)}}
+
+/* game area */
+.gameArea{display:none;flex-direction:column;height:100%}
+.iframeWrap{flex:1;border-radius:8px;overflow:hidden;background:#000}
+iframe#gameFrame{width:100%;height:100%;border:0;display:block;background:#000}
+
+/* settings controls */
+.rowFlex{display:flex;gap:12px;align-items:center;flex-wrap:wrap}
+
+/* responsive */
+@media(max-width:900px){
+  .container{flex-direction:column;padding:12px}
+  .sidebar{width:100%;order:2}
+  .content{order:1}
+}
+
+/* tooltip for hover info */
+.tooltip{
+  position:absolute; background:rgba(0,0,0,0.85); color:#fff; padding:8px; border-radius:8px; font-size:12px; pointer-events:none; z-index:20; display:none;
+}
+</style>
+</head>
+<body>
+<canvas id="bgCanvas"></canvas>
+
+<!-- HOME -->
+<div id="home">
+  <div class="homeCard" role="dialog" aria-modal="true">
+    <div id="homeTitle" class="homeTitle homeTitleInner">
+      <div class="homeTitleWrap">
+        <div id="homeTyping" class="homeTitle" style="font-size:36px;">MIC Game Library</div>
+        <div class="subTitle">Chromebook gaming done best offline.</div>
+        <button id="enterBtn" class="enterBtn">Enter Library</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- overlay spinner -->
+<div class="overlay" id="overlay"><div class="spinner"></div></div>
+
+<!-- header -->
+<div class="header">
+  <div class="brand">
+    <div class="logo">MIC</div>
+    <div class="titleWrap">
+      <div id="animatedTitle" class="title">MIC Game Library</div>
+      <div class="subtitle">Offline Chromebook-ready library</div>
+    </div>
+    <div class="nav" id="navTabs">
+      <div id="tabHome" class="tab">Home</div>
+      <div id="tabLibrary" class="tab active">Library</div>
+      <div id="tabFavorites" class="tab">Favorites</div>
+      <div id="tabStats" class="tab">Stats</div>
+      <div id="tabSettings" class="tab">Settings</div>
+      <div id="tabAbout" class="tab">About</div>
+    </div>
+  </div>
+
+  <div class="headerRight">
+    <div id="clock" class="clock"></div>
+    <div class="small" id="nowPlayingMini"></div>
+  </div>
+</div>
+
+<!-- main layout -->
+<div class="container">
+  <div class="sidebar panel" id="sidebarPanel">
+    <div class="searchBox">
+      <input id="searchInput" placeholder="Search games or press /" />
+      <button id="clearSearch">X</button>
+    </div>
+
+    <div class="toggleLine">
+      <div class="small">Sort</div>
+      <div style="display:flex;gap:8px">
+        <select id="sortSelect" class="select">
+          <option value="alpha">Alphabetical</option>
+          <option value="launches">By Launches</option>
+          <option value="playtime">Most Played</option>
+          <option value="recent">Recently Played</option>
+        </select>
+        <button id="sortApply" class="select">Apply</button>
+      </div>
+    </div>
+
+    <div class="toggleLine">
+      <label><input type="checkbox" id="favoritesOnly"/> Favorites only</label>
+    </div>
+
+    <div style="margin-top:8px">
+      <div class="small">Recently Played</div>
+      <div id="recentList" style="display:flex; gap:8px; flex-wrap:wrap; margin-top:8px"></div>
+    </div>
+
+    <div style="margin-top:auto; font-size:12px; color:var(--muted)">
+      <div>v1.0.0</div>
+    </div>
+  </div>
+
+  <div class="content">
+    <!-- LIBRARY -->
+    <div id="libraryPanel" class="panel">
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px">
+        <div style="font-weight:800">Library</div>
+        <div class="controls">
+          <button id="openSettingsBtn" class="select">Settings</button>
+        </div>
+      </div>
+      <div id="gameGrid" class="grid"></div>
+    </div>
+
+    <!-- FAVORITES -->
+    <div id="favoritesPanel" class="panel" style="display:none">
+      <div style="font-weight:800;margin-bottom:8px">Favorites</div>
+      <div id="favoritesGrid" class="grid"></div>
+    </div>
+
+    <!-- STATS -->
+    <div id="statsPanel" class="panel" style="display:none">
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px">
+        <div style="font-weight:800">Stats</div>
+        <div id="sessionTimer" class="small">Session: 0m</div>
+      </div>
+      <div id="topThree" style="display:flex;gap:8px;margin-bottom:12px"></div>
+      <div id="statsGrid" class="statGrid"></div>
+      <div id="totalStats" style="margin-top:12px;color:var(--muted)"></div>
+    </div>
+
+    <!-- SETTINGS -->
+    <div id="settingsPanel" class="panel" style="display:none">
+      <h3>Settings</h3>
+      <div class="rowFlex">
+        <label>Theme:
+          <select id="themeSelector" class="select">
+            <option value="dark">Dark</option>
+            <option value="light">Light</option>
+            <option value="neon">Neon</option>
+            <option value="retro">Retro</option>
+            <option value="cyberpunk">Cyberpunk</option>
+          </select>
+        </label>
+
+        <label>Accent:
+          <input id="accentColor" type="color" value="#00aaff"/>
+        </label>
+
+        <label>Font / UI Scale:
+          <input id="uiScale" type="range" min="0.8" max="1.4" step="0.05" value="1"/>
+        </label>
+
+        <label>Rounded Corners:
+          <input id="roundedToggle" type="checkbox" checked/>
+        </label>
+
+        <label>Compact Mode:
+          <input id="compactToggle" type="checkbox"/>
+        </label>
+
+        <label>Animated Background:
+          <input id="animatedBgToggle" type="checkbox" checked/>
+        </label>
+
+        <label>Title Animation:
+          <input id="titleAnimToggle" type="checkbox" checked/>
+        </label>
+
+        <label>Low Performance Mode:
+          <input id="lowPerfToggle" type="checkbox"/>
+        </label>
+
+        <label>Background Transparency:
+          <input id="bgTransparency" type="range" min="0" max="0.2" step="0.01" value="0.02"/>
+        </label>
+
+        <label>Sound FX:
+          <input id="soundFxToggle" type="checkbox"/>
+        </label>
+
+        <label>Auto Theme (time-based):
+          <input id="autoThemeToggle" type="checkbox"/>
+        </label>
+
+        <label>Startup Page:
+          <select id="startupSelector" class="select">
+            <option value="library">Library</option>
+            <option value="favorites">Favorites</option>
+            <option value="stats">Stats</option>
+            <option value="about">About</option>
+          </select>
+        </label>
+      </div>
+
+      <div style="margin-top:12px">
+        <button id="exportData" class="select">Export Data</button>
+        <button id="importData" class="select">Import Data</button>
+        <input type="file" id="importFile" style="display:none"/>
+        <button id="resetData" class="select">Reset Favorites & Stats</button>
+      </div>
+    </div>
+
+    <!-- ABOUT -->
+    <div id="aboutPanel" class="panel" style="display:none">
+      <h2>About</h2>
+      <p>This a app with like 130 games and soon to be added to V6 Comming soon!!</p>
+    </div>
+
+    <!-- GAME AREA -->
+    <div id="gameArea" class="gameArea panel" style="display:none">
+      <div style="display:flex;justify-content:space-between;align-items:center;padding:8px 0">
+        <div>
+          <strong id="currentGameTitle"></strong>
+          <div id="currentGameMeta" class="small"></div>
+        </div>
+        <div>
+          <button id="backBtn" class="select">Back</button>
+          <button id="fullscreenBtn" class="select">Fullscreen</button>
+        </div>
+      </div>
+      <div class="iframeWrap">
+        <iframe id="gameFrame" allowfullscreen sandbox="allow-scripts allow-forms allow-modals allow-same-origin"></iframe>
+      </div>
+      <div style="padding-top:8px">
+        <div id="playtimeLive" class="small"></div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div id="tooltip" class="tooltip"></div>
+
+<!-- load games_data.js first -->
+<script src="games_data.js"></script>
+
+<script>
+/* ============================
+   MIC Game Library Main Script
+   ============================ */
+
+/* ----- elements ----- */
+const home = document.getElementById('home');
+const enterBtn = document.getElementById('enterBtn');
+const overlay = document.getElementById('overlay');
+const bgCanvas = document.getElementById('bgCanvas');
+const clockEl = document.getElementById('clock');
+const animatedTitle = document.getElementById('animatedTitle');
+const homeTyping = document.getElementById('homeTyping');
+
+const tabs = {
+  home: document.getElementById('tabHome'),
+  library: document.getElementById('tabLibrary'),
+  favorites: document.getElementById('tabFavorites'),
+  stats: document.getElementById('tabStats'),
+  settings: document.getElementById('tabSettings'),
+  about: document.getElementById('tabAbout'),
+};
+const panels = {
+  home,
+  library: document.getElementById('libraryPanel'),
+  favorites: document.getElementById('favoritesPanel'),
+  stats: document.getElementById('statsPanel'),
+  settings: document.getElementById('settingsPanel'),
+  about: document.getElementById('aboutPanel'),
+  game: document.getElementById('gameArea'),
+};
+
+const searchInput = document.getElementById('searchInput');
+const clearSearch = document.getElementById('clearSearch');
+const gameGrid = document.getElementById('gameGrid');
+const favoritesGrid = document.getElementById('favoritesGrid');
+const recentList = document.getElementById('recentList');
+const recentSection = document.getElementById('recentSection');
+
+const themeSelector = document.getElementById('themeSelector');
+const accentColor = document.getElementById('accentColor');
+const uiScale = document.getElementById('uiScale');
+const roundedToggle = document.getElementById('roundedToggle');
+const compactToggle = document.getElementById('compactToggle');
+const animatedBgToggle = document.getElementById('animatedBgToggle');
+const titleAnimToggle = document.getElementById('titleAnimToggle');
+const lowPerfToggle = document.getElementById('lowPerfToggle');
+const bgTransparency = document.getElementById('bgTransparency');
+const soundFxToggle = document.getElementById('soundFxToggle');
+const autoThemeToggle = document.getElementById('autoThemeToggle');
+const startupSelector = document.getElementById('startupSelector');
+
+const sortSelect = document.getElementById('sortSelect');
+const sortApply = document.getElementById('sortApply');
+const favoritesOnly = document.getElementById('favoritesOnly');
+
+const openSettingsBtn = document.getElementById('openSettingsBtn');
+const gameFrame = document.getElementById('gameFrame');
+const gameArea = document.getElementById('gameArea');
+const backBtn = document.getElementById('backBtn');
+const fullscreenBtn = document.getElementById('fullscreenBtn');
+
+const exportDataBtn = document.getElementById('exportData');
+const importDataBtn = document.getElementById('importData');
+const importFile = document.getElementById('importFile');
+const resetDataBtn = document.getElementById('resetData');
+
+const tooltip = document.getElementById('tooltip');
+const currentGameTitle = document.getElementById('currentGameTitle');
+const currentGameMeta = document.getElementById('currentGameMeta');
+const playtimeLive = document.getElementById('playtimeLive');
+const nowPlayingMini = document.getElementById('nowPlayingMini');
+
+let dataKeys = [];
+let currentGame = null;
+let gameStartTs = null;
+let playInterval = null;
+let sessionStart = Date.now();
+
+/* ---- default settings & load from localStorage ---- */
+const defaultSettings = {
+  theme: localStorage.getItem('theme') || 'dark',
+  accent: localStorage.getItem('accent') || '#00aaff',
+  uiScale: parseFloat(localStorage.getItem('uiScale')||'1'),
+  rounded: JSON.parse(localStorage.getItem('rounded')||'true'),
+  compact: JSON.parse(localStorage.getItem('compact')||'false'),
+  animatedBg: JSON.parse(localStorage.getItem('animatedBg')||'true'),
+  titleAnim: JSON.parse(localStorage.getItem('titleAnim')||'true'),
+  lowPerf: JSON.parse(localStorage.getItem('lowPerf')||'false'),
+  bgTransparency: parseFloat(localStorage.getItem('bgTransparency')||'0.02'),
+  soundFx: JSON.parse(localStorage.getItem('soundFx')||'false'),
+  autoTheme: JSON.parse(localStorage.getItem('autoTheme')||'false'),
+  startupPage: localStorage.getItem('startupPage')||'library'
+};
+Object.assign(defaultSettings, {});
+
+/* apply initial UI variables */
+function applyUIVars(){
+  document.documentElement.style.setProperty('--accent', defaultSettings.accent);
+  document.documentElement.style.setProperty('--accent-contrast', '#000');
+  document.documentElement.style.setProperty('--radius', defaultSettings.rounded ? '10px' : '2px');
+  document.documentElement.style.setProperty('--scale', defaultSettings.uiScale);
+  document.documentElement.style.setProperty('--transparency', defaultSettings.bgTransparency);
+  document.documentElement.style.setProperty('--card', defaultSettings.theme === 'light' ? '#ffffff' : '#151515');
+}
+applyUIVars();
+
+/* theme presets */
+const themes = {
+  dark:{'--bg':'#0b0b0b','--text':'#cfcfcf','--panel':'#111','--muted':'#9a9a9a','--card':'#151515'},
+  light:{'--bg':'#f0f0f0','--text':'#111','--panel':'#ddd','--muted':'#444','--card':'#fff'},
+  neon:{'--bg':'#000','--text':'#39ff14','--panel':'#0a0a0a','--muted':'#7ff27f','--card':'#071207'},
+  retro:{'--bg':'#f4e842','--text':'#000','--panel':'#e4d82f','--muted':'#3a3a3a','--card':'#e4d82f'},
+  cyberpunk:{'--bg':'#111','--text':'#ff00ff','--panel':'#1a1a1a','--muted':'#ff77ff','--card':'#221122'}
+};
+function applyTheme(name){
+  const t = themes[name]||themes.dark;
+  Object.keys(t).forEach(k=>document.documentElement.style.setProperty(k,t[k]));
+  defaultSettings.theme = name;
+  localStorage.setItem('theme', name);
+  applyUIVars();
+}
+applyTheme(defaultSettings.theme);
+
+/* ----- Snow (digital particles) on canvas ----- */
+const canvas = bgCanvas;
+const ctx = canvas.getContext('2d');
+let particles = [];
+function resizeCanvas(){ canvas.width = innerWidth; canvas.height = innerHeight; }
+window.addEventListener('resize', resizeCanvas); resizeCanvas();
+
+function initParticles(count=160){
+  particles = [];
+  for(let i=0;i<count;i++){
+    particles.push({
+      x: Math.random()*canvas.width,
+      y: Math.random()*canvas.height,
+      vx: (Math.random()-0.5)*0.2,
+      vy: 0.2 + Math.random()*0.6,
+      r: 1 + Math.random()*2,
+      alpha: 0.2 + Math.random()*0.7,
+      glow: Math.random()*1
+    });
+  }
+}
+initParticles(140);
+
+let animRunning = true;
+function drawParticles(){
+  if(!defaultSettings.animatedBg || defaultSettings.lowPerf) { ctx.clearRect(0,0,canvas.width,canvas.height); return; }
+  ctx.clearRect(0,0,canvas.width,canvas.height);
+  for(const p of particles){
+    p.x += p.vx;
+    p.y += p.vy;
+    if(p.y > canvas.height + 10){ p.y = -10; p.x = Math.random()*canvas.width; }
+    if(p.x < -20) p.x = canvas.width + 20;
+    if(p.x > canvas.width + 20) p.x = -20;
+    // digital look: small glowing dots
+    const g = ctx.createRadialGradient(p.x, p.y, 0, p.x, p.y, p.r*6);
+    g.addColorStop(0, `rgba(255,255,255,${p.alpha})`);
+    g.addColorStop(0.4, `rgba(${hexToRgb(defaultSettings.accent).join(',')},${p.alpha*0.6})`);
+    g.addColorStop(1, 'rgba(0,0,0,0)');
+    ctx.fillStyle = g;
+    ctx.beginPath();
+    ctx.arc(p.x,p.y,p.r,0,Math.PI*2);
+    ctx.fill();
+  }
+  if(animRunning) requestAnimationFrame(drawParticles);
+}
+drawParticles();
+
+function hexToRgb(hex){ hex = hex.replace('#',''); if(hex.length===3) hex = hex.split('').map(h=>h+h).join(''); const n = parseInt(hex,16); return [(n>>16)&255, (n>>8)&255, n&255]; }
+
+/* ----- Title typing animation ----- */
+let titleIdx = 0;
+const fullTitle = 'MIC Game Library';
+setInterval(()=> {
+  if(!defaultSettings.titleAnim){ animatedTitle.textContent = fullTitle; homeTyping.textContent = fullTitle; return; }
+  titleIdx = (titleIdx + 1) % (fullTitle.length + 40);
+  if(titleIdx <= fullTitle.length) animatedTitle.textContent = fullTitle.slice(0,titleIdx);
+  else animatedTitle.textContent = fullTitle;
+  if(titleIdx <= fullTitle.length) homeTyping.textContent = fullTitle.slice(0,titleIdx);
+  else homeTyping.textContent = fullTitle;
+}, 120);
+
+/* ----- Clock ----- */
+function updateClock(){
+  const d = new Date();
+  clockEl.textContent = d.toLocaleTimeString([], {hour:'2-digit', minute:'2-digit', second:'2-digit'});
+}
+setInterval(updateClock,1000); updateClock();
+
+/* ----- basic utilities ----- */
+function secsToNice(s){ if(!s) return '0m'; const mins = Math.floor(s/60); if(mins<60) return `${mins}m`; const hours = Math.floor(mins/60); const rem = mins%60; return `${hours}h ${rem}m`; }
+function nowISO(){ return new Date().toISOString(); }
+function formatDate(iso){ if(!iso) return 'Never'; const d = new Date(iso); return d.toLocaleString(); }
+
+/* ----- data keys ----- */
+function buildKeys(){ if(typeof data === 'undefined') return []; return Object.keys(data); }
+
+/* ----- render functions ----- */
+function renderLibrary(){
+  gameGrid.innerHTML = '';
+  dataKeys = buildKeys();
+  const q = searchInput.value.trim().toLowerCase();
+  let filtered = dataKeys.filter(k=>{
+    if(favoritesOnly.checked && localStorage.getItem('star_'+k) !== 'true') return false;
+    if(!q) return true;
+    return k.toLowerCase().includes(q);
+  });
+  const sortBy = sortSelect.value;
+  filtered.sort((a,b)=>{
+    if(sortBy==='alpha') return a.localeCompare(b);
+    if(sortBy==='launches') return (parseInt(localStorage.getItem('launches_'+b)||0)) - (parseInt(localStorage.getItem('launches_'+a)||0));
+    if(sortBy==='playtime') return (parseInt(localStorage.getItem('playtime_'+b)||0)) - (parseInt(localStorage.getItem('playtime_'+a)||0));
+    if(sortBy==='recent') return (new Date(localStorage.getItem('lastplayed_'+b || 0)).getTime() || 0) - (new Date(localStorage.getItem('lastplayed_'+a || 0)).getTime() || 0);
+    return 0;
+  });
+
+  filtered.forEach(name=>{
+    const card = document.createElement('div');
+    card.className = 'gameCard';
+    if(defaultSettings.compact || defaultSettings.compact === true) card.classList.add('compact');
+
+    const title = document.createElement('div'); title.className='gameTitle'; title.textContent = name;
+    const meta = document.createElement('div'); meta.className='small'; 
+    const launches = parseInt(localStorage.getItem('launches_'+name)||0);
+    const play = parseInt(localStorage.getItem('playtime_'+name)||0);
+    const last = localStorage.getItem('lastplayed_'+name);
+    meta.textContent = `${launches} launches • ${secsToNice(play)} • Last: ${formatDate(last)}`;
+
+    const starBtn = document.createElement('span'); starBtn.textContent = localStorage.getItem('star_'+name) === 'true' ? '★' : '☆'; starBtn.style.cursor='pointer';
+    starBtn.onclick = (e)=>{ e.stopPropagation(); localStorage.setItem('star_'+name, localStorage.getItem('star_'+name)==='true' ? 'false':'true'); renderLibrary(); renderFavorites(); renderStats(); };
+
+    card.appendChild(title);
+    card.appendChild(meta);
+    meta.appendChild(starBtn);
+
+    /* hover tooltip info */
+    card.onmousemove = (ev)=> showTooltip(ev, name);
+    card.onmouseleave = hideTooltip;
+
+    card.onclick = ()=> openGame(name);
+    gameGrid.appendChild(card);
+  });
+
+  renderRecentMini();
+}
+
+/* ----- render favorites ----- */
+function renderFavorites(){
+  favoritesGrid.innerHTML = '';
+  dataKeys.forEach(name=>{
+    if(localStorage.getItem('star_'+name) === 'true'){
+      const card = document.createElement('div');
+      card.className='gameCard';
+      card.textContent = name;
+      card.onclick = ()=> openGame(name);
+      favoritesGrid.appendChild(card);
+    }
+  });
+}
+
+/* ----- stats ----- */
+function renderStats(){
+  const statsGrid = document.getElementById('statsGrid');
+  const topThree = document.getElementById('topThree');
+  const totalStats = document.getElementById('totalStats');
+  statsGrid.innerHTML=''; topThree.innerHTML='';
+  let totalPlay=0, totalLaunch=0;
+  const arr=[];
+  dataKeys.forEach(name=>{
+    const launches = parseInt(localStorage.getItem('launches_'+name)||0);
+    const playtime = parseInt(localStorage.getItem('playtime_'+name)||0);
+    totalPlay += playtime; totalLaunch += launches;
+    arr.push({name, launches, playtime});
+    const card = document.createElement('div'); card.className='statCard';
+    card.innerHTML = `<strong>${name}</strong><div class="small">Launches: ${launches} • Playtime: ${secsToNice(playtime)}</div>`;
+    statsGrid.appendChild(card);
+  });
+  arr.sort((a,b)=>b.playtime - a.playtime);
+  arr.slice(0,3).forEach(a=>{
+    const c = document.createElement('div'); c.className='statCard'; c.style.flex='1';
+    c.innerHTML = `<strong>${a.name}</strong><div class="small">${secsToNice(a.playtime)} • ${a.launches} launches</div>`;
+    topThree.appendChild(c);
+  });
+  totalStats.innerHTML = `<strong>Total Launches:</strong> ${totalLaunch} | <strong>Total Playtime:</strong> ${secsToNice(totalPlay)}`;
+}
+
+/* ----- recently ----- */
+function renderRecentMini(){
+  recentList.innerHTML='';
+  const recent = JSON.parse(localStorage.getItem('recent_games') || '[]');
+  recent.slice(0,8).forEach(n=>{
+    const el = document.createElement('div'); el.className='recentCard'; el.textContent = n; el.onclick = ()=>openGame(n);
+    recentList.appendChild(el);
+  });
+}
+
+/* ----- tooltip ----- */
+function showTooltip(ev, name){
+  const t = tooltip;
+  t.style.left = (ev.clientX + 12) + 'px';
+  t.style.top = (ev.clientY + 12) + 'px';
+  t.style.display = 'block';
+  const launches = parseInt(localStorage.getItem('launches_'+name)||0);
+  const play = parseInt(localStorage.getItem('playtime_'+name)||0);
+  const last = localStorage.getItem('lastplayed_'+name);
+  t.innerHTML = `<strong>${name}</strong><div class="small">${launches} launches • ${secsToNice(play)}</div><div class="small">Last: ${formatDate(last)}</div>`;
+}
+function hideTooltip(){ tooltip.style.display='none'; }
+
+/* ----- open / close game with URL validation and accurate timing ----- */
+function openGame(name){
+  if(typeof data === 'undefined' || !data) return alert('games_data.js missing or "data" not defined.');
+  if(!data[name]) return alert('Game not found: ' + name);
+
+  overlay.style.display = 'flex';
+  currentGame = name;
+  currentGameTitle.textContent = name;
+  const entry = data[name];
+  let url = (typeof entry === 'string') ? entry : (entry.url || entry.src || '');
+  try {
+    if(!url || url === '') throw new Error('Empty URL');
+    if(url.startsWith('data:text/html;base64,')){
+      gameFrame.srcdoc = atob(url.split(',')[1]);
+    } else {
+      gameFrame.src = new URL(url, location.href).href;
+    }
+  } catch(err){
+    overlay.style.display='none'; currentGame = null;
+    console.warn('Invalid URL for', name, err);
+    return alert('Unable to load game "'+name+'". URL invalid or blocked.');
+  }
+
+  localStorage.setItem('launches_'+name, (parseInt(localStorage.getItem('launches_'+name)||0) + 1));
+  const recent = JSON.parse(localStorage.getItem('recent_games')||'[]').filter(r=>r!==name); recent.unshift(name); localStorage.setItem('recent_games', JSON.stringify(recent.slice(0,20)));
+  // record now as lastplayed at close; we'll set lastplayed on close
+  hideAllPanels(); panels.game.style.display='flex'; panels.game.style.zIndex=2;
+  gameArea.style.display = 'flex';
+
+  gameStartTs = Date.now();
+  if(playInterval) clearInterval(playInterval);
+  playInterval = setInterval(()=> {
+    const elapsed = Math.floor((Date.now() - gameStartTs)/1000);
+    playtimeLive.textContent = `Session: ${secsToNice(elapsed)}`;
+  }, 1000);
+
+  // hide overlay once iframe loads or fallback
+  let done=false;
+  function onLoad(){ if(done) return; done=true; overlay.style.display='none'; gameFrame.removeEventListener('load', onLoad); }
+  gameFrame.addEventListener('load', onLoad);
+  setTimeout(()=>{ if(!done){ overlay.style.display='none'; done=true; gameFrame.removeEventListener('load', onLoad); } },8000);
+
+  nowPlayingMini.textContent = 'Now Playing: ' + name;
+}
+
+function closeGame(){
+  if(!currentGame) return;
+  const elapsedSec = Math.floor((Date.now() - gameStartTs)/1000);
+  const prev = parseInt(localStorage.getItem('playtime_'+currentGame)||0);
+  localStorage.setItem('playtime_'+currentGame, prev + elapsedSec);
+  localStorage.setItem('lastplayed_'+currentGame, nowISO());
+  if(playInterval) clearInterval(playInterval);
+  playInterval = null; gameStartTs = null;
+  try{ gameFrame.src = 'about:blank'; }catch(e){}
+  panels.game.style.display='none';
+  currentGame = null;
+  nowPlayingMini.textContent = '';
+  renderLibrary(); renderFavorites(); renderStats(); renderRecentMini();
+}
+
+/* ----- helpers: hide/show panels ----- */
+function hideAllPanels(){
+  Object.keys(panels).forEach(k=>{
+    if(panels[k] && panels[k] !== home) panels[k].style.display = 'none';
+    if(tabs[k]) tabs[k].classList.remove('active');
+  });
+}
+
+/* ----- attach tabs ----- */
+tabs.home.addEventListener('click', ()=> showTab('home'));
+tabs.library.addEventListener('click', ()=> showTab('library'));
+tabs.favorites.addEventListener('click', ()=> showTab('favorites'));
+tabs.stats.addEventListener('click', ()=> showTab('stats'));
+tabs.settings.addEventListener('click', ()=> showTab('settings'));
+tabs.about.addEventListener('click', ()=> showTab('about'));
+
+function showTab(name){
+  if(name === 'home'){ // show home overlay
+    home.style.display='flex';
+  } else {
+    if(home.style.display !== 'none') { home.style.display='none'; }
+    hideAllPanels();
+    if(panels[name]) panels[name].style.display = 'block';
+    if(tabs[name]) tabs[name].classList.add('active');
+    if(name === 'library') renderLibrary();
+    if(name === 'favorites') renderFavorites();
+    if(name === 'stats') renderStats();
+  }
+}
+
+/* ----- search/sort handlers ----- */
+searchInput.addEventListener('input', ()=> renderLibrary());
+clearSearch.addEventListener('click', ()=>{ searchInput.value=''; renderLibrary(); });
+sortApply.addEventListener('click', ()=> renderLibrary());
+
+/* ----- settings UI binding ----- */
+function loadSettingsUI(){
+  themeSelector.value = defaultSettings.theme;
+  accentColor.value = defaultSettings.accent;
+  uiScale.value = defaultSettings.uiScale;
+  roundedToggle.checked = defaultSettings.rounded;
+  compactToggle.checked = defaultSettings.compact;
+  animatedBgToggle.checked = defaultSettings.animatedBg;
+  titleAnimToggle.checked = defaultSettings.titleAnim;
+  lowPerfToggle.checked = defaultSettings.lowPerf;
+  bgTransparency.value = defaultSettings.bgTransparency;
+  soundFxToggle.checked = defaultSettings.soundFx;
+  autoThemeToggle.checked = defaultSettings.autoTheme;
+  startupSelector.value = defaultSettings.startupPage;
+}
+loadSettingsUI();
+
+themeSelector.addEventListener('change', ()=>{ applyTheme(themeSelector.value); localStorage.setItem('theme', themeSelector.value); renderLibrary(); renderFavorites(); renderStats(); });
+accentColor.addEventListener('change', ()=>{ defaultSettings.accent = accentColor.value; localStorage.setItem('accent', accentColor.value); applyUIVars(); });
+uiScale.addEventListener('input', ()=>{ defaultSettings.uiScale = parseFloat(uiScale.value); localStorage.setItem('uiScale', defaultSettings.uiScale); applyUIVars(); });
+roundedToggle.addEventListener('change', ()=>{ defaultSettings.rounded = roundedToggle.checked; localStorage.setItem('rounded', defaultSettings.rounded); applyUIVars(); });
+compactToggle.addEventListener('change', ()=>{ defaultSettings.compact = compactToggle.checked; localStorage.setItem('compact', defaultSettings.compact); renderLibrary(); });
+animatedBgToggle.addEventListener('change', ()=>{ defaultSettings.animatedBg = animatedBgToggle.checked; localStorage.setItem('animatedBg', defaultSettings.animatedBg); });
+titleAnimToggle.addEventListener('change', ()=>{ defaultSettings.titleAnim = titleAnimToggle.checked; localStorage.setItem('titleAnim', defaultSettings.titleAnim); });
+lowPerfToggle.addEventListener('change', ()=>{ defaultSettings.lowPerf = lowPerfToggle.checked; localStorage.setItem('lowPerf', defaultSettings.lowPerf); });
+bgTransparency.addEventListener('input', ()=>{ defaultSettings.bgTransparency = parseFloat(bgTransparency.value); localStorage.setItem('bgTransparency', defaultSettings.bgTransparency); applyUIVars(); });
+soundFxToggle.addEventListener('change', ()=>{ defaultSettings.soundFx = soundFxToggle.checked; localStorage.setItem('soundFx', defaultSettings.soundFx); });
+autoThemeToggle.addEventListener('change', ()=>{ defaultSettings.autoTheme = autoThemeToggle.checked; localStorage.setItem('autoTheme', defaultSettings.autoTheme); });
+
+startupSelector.addEventListener('change', ()=>{ localStorage.setItem('startupPage', startupSelector.value); });
+
+openSettingsBtn.addEventListener('click', ()=> showTab('settings'));
+
+/* ----- export/import/reset ----- */
+exportDataBtn.addEventListener('click', ()=>{
+  const out = {};
+  Object.keys(localStorage).forEach(k=>{
+    if(k.startsWith('star_')||k.startsWith('launches_')||k.startsWith('playtime_')||k.startsWith('lastplayed_')||k==='recent_games') out[k] = localStorage.getItem(k);
+    if(['theme','accent','uiScale','rounded','compact','animatedBg','titleAnim','lowPerf','bgTransparency','soundFx','autoTheme','startupPage'].includes(k)) out[k] = localStorage.getItem(k);
+  });
+  const blob = new Blob([JSON.stringify(out)], {type:'application/json'});
+  const a = document.createElement('a'); a.href = URL.createObjectURL(blob); a.download = 'mic_export.json'; a.click();
+});
+importDataBtn.addEventListener('click', ()=> importFile.click());
+importFile.addEventListener('change', (e)=>{
+  const f = e.target.files[0]; if(!f) return;
+  const r = new FileReader(); r.onload = ev => {
+    try{
+      const obj = JSON.parse(ev.target.result);
+      Object.keys(obj).forEach(k=> localStorage.setItem(k, obj[k]));
+      alert('Imported data');
+      location.reload();
+    }catch(err){ alert('Invalid JSON'); }
+  }; r.readAsText(f);
+});
+resetDataBtn.addEventListener('click', ()=>{
+  if(!confirm('Reset favorites & stats?')) return;
+  Object.keys(localStorage).forEach(k=>{
+    if(k.startsWith('star_')||k.startsWith('launches_')||k.startsWith('playtime_')||k.startsWith('lastplayed_')||k==='recent_games') localStorage.removeItem(k);
+  });
+  renderLibrary(); renderFavorites(); renderStats(); renderRecentMini();
+});
+
+/* ----- keyboard shortcuts ----- */
+window.addEventListener('keydown', (e)=>{
+  if(e.key === '/' && document.activeElement !== searchInput){ e.preventDefault(); searchInput.focus(); }
+  if(e.key === 'Escape'){ if(currentGame) closeGame(); }
+});
+
+/* ----- session timer ----- */
+setInterval(()=>{
+  const elapsed = Math.floor((Date.now() - sessionStart)/1000);
+  document.getElementById('sessionTimer').textContent = 'Session: ' + secsToNice(elapsed);
+}, 1000);
+
+/* ----- initial load after games_data.js ----- */
+window.addEventListener('load', ()=>{
+  if(typeof data === 'undefined'){ document.getElementById('gameGrid').innerHTML = '<div style="color:var(--muted)">No games_data.js found or "data" not defined.</div>'; return; }
+  dataKeys = buildKeys();
+  renderLibrary(); renderFavorites(); renderStats(); renderRecentMini();
+  // hide home and show startup page if user already passed home before (we'll show home at start)
+  // show home overlay initially; enter button triggers transition
+  enterBtn.addEventListener('click', ()=>{
+    // fade + slide library in
+    home.style.transition = 'opacity .6s ease, transform .6s ease';
+    home.style.opacity = '0';
+    home.style.transform = 'translateY(-20px)';
+    setTimeout(()=> home.style.display='none', 650);
+    // focus library
+    showTab(defaultSettings.startupPage || 'library');
+  });
+
+  // ensure startup page setting
+  if(localStorage.getItem('hasEntered') === 'true'){
+    home.style.display='none';
+    showTab(localStorage.getItem('startupPage')||'library');
+  } else {
+    // show home overlay; store that user has seen it after entry
+    localStorage.setItem('hasEntered','true');
+  }
+});
+
+/* ----- back and fullscreen ----- */
+backBtn.addEventListener('click', ()=>{
+  if(currentGame){
+    if(defaultSettings.lowPerf || confirm('Exit current game and return to library?')){
+      closeGame();
+      showTab(localStorage.getItem('startupPage')||'library');
+    }
+  }
+});
+fullscreenBtn.addEventListener('click', ()=>{
+  if(gameFrame.requestFullscreen) gameFrame.requestFullscreen();
+  else if(gameFrame.webkitRequestFullscreen) gameFrame.webkitRequestFullscreen();
+});
+
+/* ----- defensive: before unload if in game ----- */
+window.addEventListener('beforeunload', (e)=>{
+  if(currentGame && defaultSettings.lowPerf === false){
+    e.preventDefault(); e.returnValue='';
+  }
+});
+
+/* ----- popstate handler ----- */
+window.addEventListener('popstate', ()=>{
+  if(currentGame){
+    if(!confirm('Exit current game?')) return;
+    closeGame();
+  }
+});
+
+/* ----- small helper to set defaults if missing ----- */
+(function ensureSettingsStored(){
+  Object.keys(defaultSettings).forEach(k=>{
+    if(localStorage.getItem(k) === null){
+      localStorage.setItem(k, defaultSettings[k]);
+    }
+  });
+})();
+
+/* ----- public helper to change behavior if accent set outside ----- */
+function updateAccentColor(c){
+  defaultSettings.accent = c;
+  localStorage.setItem('accent', c);
+  applyUIVars();
+}
+accentColor.addEventListener('input', (e)=> updateAccentColor(e.target.value));
+
+/* ----- end of script ----- */
+</script>
+</body>
+</html>
+
+
